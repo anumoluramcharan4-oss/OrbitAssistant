@@ -1,6 +1,7 @@
 import Foundation
 import Speech
 import AVFoundation
+import CoreAudio
 
 class SpeechService: ObservableObject {
     static let shared = SpeechService()
@@ -18,9 +19,14 @@ class SpeechService: ObservableObject {
     @Published var audioBufferCount: Int = 0
     @Published var micLevel: Float = 0.0
     @Published var debugLogs: [String] = []
+    @Published var selectedInputDeviceName: String = "Unknown"
     
     var onTranscriptionComplete: ((String) -> Void)?
     var onError: ((String) -> Void)?
+    
+    var isAttemptingToListen: Bool {
+        return audioEngine.isRunning
+    }
     
     private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
@@ -73,6 +79,8 @@ class SpeechService: ObservableObject {
             self.micPermissionStatus = micStatusStr
             self.speechPermissionStatus = speechStatusStr
         }
+        
+        updateInputDeviceName()
         
         logDebug("Microphone permission status: \(micStatusStr)")
         logDebug("Speech-recognition permission status: \(speechStatusStr)")
@@ -143,6 +151,56 @@ class SpeechService: ObservableObject {
                 }
                 self.logDebug("Exact error: Speech recognition access denied by user.")
                 completion(false)
+            }
+        }
+    }
+    
+    // Helper to query the current active input device using CoreAudio
+    func updateInputDeviceName() {
+        var deviceID = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: 0
+        )
+        
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &size,
+            &deviceID
+        )
+        
+        guard status == noErr else {
+            DispatchQueue.main.async {
+                self.selectedInputDeviceName = "Unknown Device"
+            }
+            return
+        }
+        
+        var nameSize = UInt32(MemoryLayout<CFString>.size)
+        var deviceName: CFString = "" as CFString
+        address.mSelector = kAudioDevicePropertyDeviceNameCFString
+        address.mScope = kAudioObjectPropertyScopeGlobal
+        address.mElement = 0
+        
+        let nameStatus = AudioObjectGetPropertyData(
+            deviceID,
+            &address,
+            0,
+            nil,
+            &nameSize,
+            &deviceName
+        )
+        
+        DispatchQueue.main.async {
+            if nameStatus == noErr {
+                self.selectedInputDeviceName = deviceName as String
+            } else {
+                self.selectedInputDeviceName = "Unknown Device (\(deviceID))"
             }
         }
     }
@@ -254,6 +312,10 @@ class SpeechService: ObservableObject {
             }
             
             DispatchQueue.main.async {
+                if !self.isListening {
+                    self.isListening = true
+                    self.logDebug("Audio engine started receiving buffers. Listening state activated.")
+                }
                 self.micLevel = min(max(rms * 5.0, 0.0), 1.0)
                 self.audioBufferCount += 1
                 
@@ -267,17 +329,15 @@ class SpeechService: ObservableObject {
         audioEngine.prepare()
         try audioEngine.start()
         
-        // Set isListening to true only after successful setup and start of the audioEngine
-        self.isListening = true
-        logDebug("Audio engine started successfully. Listening state activated.")
+        logDebug("Audio engine started successfully. Awaiting first audio buffers...")
         
         // Initialize silence timer
         self.silenceDuration = 0.0
         self.silenceTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self = self else { return }
-            guard self.isListening else { return }
+            guard self.audioEngine.isRunning else { return }
             
-            if self.micLevel < 0.005 {
+            if self.audioBufferCount == 0 || self.micLevel < 0.005 {
                 self.silenceDuration += 1.0
                 if self.silenceDuration >= 3.0 {
                     DispatchQueue.main.async {
@@ -346,11 +406,15 @@ class SpeechService: ObservableObject {
         audioEngine.inputNode.removeTap(onBus: 0)
         recognitionRequest = nil
         recognitionTask = nil
+        
+        DispatchQueue.main.async {
+            self.isListening = false
+        }
     }
     
     // Stops listening and tears down audioEngine taps, awaiting the final callback result
     func stopRecognition() {
-        guard isListening else { return }
+        guard isListening || audioEngine.isRunning else { return }
         
         logDebug("Manually stopping recognition. Waiting for final callback...")
         
@@ -364,6 +428,10 @@ class SpeechService: ObservableObject {
         
         recognitionRequest?.endAudio()
         recognitionTask?.finish()
+        
+        DispatchQueue.main.async {
+            self.isListening = false
+        }
     }
     
     // Synthesizes and speaks text using native voices

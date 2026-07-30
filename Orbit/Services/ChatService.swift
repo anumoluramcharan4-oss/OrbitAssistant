@@ -56,7 +56,7 @@ class ChatService: ObservableObject {
     }
     
     func toggleSpeechRecognition() {
-        if SpeechService.shared.isListening {
+        if SpeechService.shared.isAttemptingToListen {
             SpeechService.shared.stopRecognition()
         } else {
             // Setup callbacks

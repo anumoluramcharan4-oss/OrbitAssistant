@@ -8,6 +8,7 @@ struct MainView: View {
     @State private var isSendHovered = false
     @State private var showSettings = false
     @FocusState private var isTextFieldFocused: Bool
+    @State private var showMicDiagnostic = false
     
     var body: some View {
         HStack(spacing: 18) {
@@ -64,13 +65,11 @@ struct MainView: View {
                     }
                     .padding(.trailing, 16)
                 }
-                .padding(.top, 24)
-                .padding(.bottom, 16)
+                .padding(.top, 16)
+                .padding(.bottom, 12)
                 
-                Spacer()
-                
-                // Centered Microphone & Wave Visualizer
-                VStack(spacing: 16) {
+                // Centered Microphone & Wave Visualizer (Compact layout)
+                VStack(spacing: 12) {
                     MicrophoneButton()
                     
                     // Status Label with glowing indicator dot
@@ -134,28 +133,129 @@ struct MainView: View {
                             .padding(.horizontal, 24)
                             .transition(.opacity)
                     }
-                    
-                    // Voice error message card
-                    if let error = speechService.errorMessage {
-                        HStack(spacing: 6) {
+                }
+                .padding(.vertical, 12)
+                
+                // Voice error message card & diagnostics (Sequential, no overlapping)
+                if let error = speechService.errorMessage {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .center, spacing: 8) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .foregroundColor(.red)
+                            
                             Text(error)
-                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                                .font(.system(size: 11, weight: .medium, design: .rounded))
                                 .foregroundColor(.red)
-                                .multilineTextAlignment(.center)
+                                .lineLimit(nil)
+                                .fixedSize(horizontal: false, vertical: true)
+                            
+                            Spacer()
+                            
+                            if error.contains("No microphone audio detected") {
+                                Button(action: {
+                                    withAnimation {
+                                        showMicDiagnostic.toggle()
+                                        if showMicDiagnostic {
+                                            speechService.checkPermissions { _ in }
+                                        }
+                                    }
+                                }) {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "waveform.path.badge.minus")
+                                        Text("Check Microphone")
+                                    }
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .padding(.vertical, 4)
+                                    .padding(.horizontal, 8)
+                                    .background(Color.red.opacity(0.25))
+                                    .cornerRadius(6)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
-                        .padding(.vertical, 6)
+                        .padding(.vertical, 8)
                         .padding(.horizontal, 12)
                         .background(Color.red.opacity(0.1))
                         .cornerRadius(8)
-                        .transition(.opacity)
+                        
+                        if showMicDiagnostic && error.contains("No microphone audio detected") {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Microphone Diagnostics")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundColor(.cyan)
+                                    .padding(.bottom, 2)
+                                
+                                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+                                    GridRow {
+                                        Text("Permission Status:")
+                                            .foregroundColor(.white.opacity(0.5))
+                                        Text(speechService.micPermissionStatus)
+                                            .fontWeight(.semibold)
+                                            .foregroundColor(speechService.micPermissionStatus == "Authorized" ? .green : .red)
+                                    }
+                                    GridRow {
+                                        Text("Selected Input:")
+                                            .foregroundColor(.white.opacity(0.5))
+                                        Text(speechService.selectedInputDeviceName)
+                                    }
+                                    GridRow {
+                                        Text("Sample Rate:")
+                                            .foregroundColor(.white.opacity(0.5))
+                                        Text(String(format: "%.1f Hz", speechService.inputNodeSampleRate))
+                                    }
+                                    GridRow {
+                                        Text("Audio Buffer Count:")
+                                            .foregroundColor(.white.opacity(0.5))
+                                        Text("\(speechService.audioBufferCount)")
+                                    }
+                                    GridRow {
+                                        Text("Current Level:")
+                                            .foregroundColor(.white.opacity(0.5))
+                                        Text(String(format: "%.1f%%", speechService.micLevel * 100))
+                                    }
+                                }
+                                .font(.system(size: 11, design: .monospaced))
+                                
+                                let isDenied = speechService.micPermissionStatus == "Denied" || speechService.micPermissionStatus == "Restricted"
+                                if isDenied {
+                                    Button(action: {
+                                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
+                                            NSWorkspace.shared.open(url)
+                                        } else if let fallbackUrl = URL(string: "x-apple.systempreferences:") {
+                                            NSWorkspace.shared.open(fallbackUrl)
+                                        }
+                                    }) {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "hand.raised.fill")
+                                            Text("Open Privacy & Security Settings")
+                                        }
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundColor(.black)
+                                        .padding(.vertical, 6)
+                                        .padding(.horizontal, 12)
+                                        .background(Color.cyan)
+                                        .cornerRadius(8)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .padding(.top, 4)
+                                }
+                            }
+                            .padding(12)
+                            .background(Color.white.opacity(0.04))
+                            .cornerRadius(8)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                            )
+                        }
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+                    .transition(.opacity)
                 }
                 
-                Spacer()
-                
-                // Chat Message Viewer (Interactive HUD)
+                // Chat Message Viewer (Interactive HUD - grows/shrinks dynamically)
                 ScrollViewReader { proxy in
                     ScrollView(.vertical, showsIndicators: false) {
                         VStack(alignment: .leading, spacing: 14) {
@@ -313,7 +413,6 @@ struct MainView: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                     }
-                    .frame(height: 130)
                     .onChange(of: chatService.messages) { _ in
                         scrollToBottom(proxy: proxy)
                     }
@@ -324,10 +423,9 @@ struct MainView: View {
                         scrollToBottom(proxy: proxy)
                     }
                 }
-                .padding(.bottom, 16)
-
+                .padding(.bottom, 12)
                 
-                // Bottom Input Panel
+                // Bottom Input Panel (Composer pinned safely at the bottom)
                 HStack(spacing: 10) {
                     // Text Field Container
                     HStack {
@@ -376,6 +474,7 @@ struct MainView: View {
                     }
                 }
                 .padding(.horizontal, 16)
+                .padding(.bottom, 16)
             }
             .padding(.vertical, 16)
             
