@@ -83,22 +83,7 @@ class CommandRouter {
             let target = String(normalized.dropFirst(5)).trimmingCharacters(in: .whitespacesAndNewlines)
             let originalTarget = String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespacesAndNewlines)
             
-            // A. Check Finder folder access
-            if target == "finder" {
-                let homeDir = URL(fileURLWithPath: NSHomeDirectory())
-                DispatchQueue.main.async {
-                    NSWorkspace.shared.open(homeDir)
-                }
-                let cmd = Command(
-                    title: "Open Finder",
-                    description: "Open Finder home window",
-                    iconName: "macwindow.on.rectangle",
-                    category: "System"
-                )
-                return CommandRoutingResult(responseText: "Opening Finder.", commandToRegister: cmd)
-            }
-            
-            // B. Check allowlisted web addresses (google, youtube, github, gmail)
+            // A. Check allowlisted web addresses (google, youtube, github, gmail)
             let allowedWebsites = ["google", "youtube", "github", "gmail"]
             if allowedWebsites.contains(target) {
                 MacActionService.shared.openWebsite(name: target) { _, _ in }
@@ -111,7 +96,7 @@ class CommandRouter {
                 return CommandRoutingResult(responseText: "Opening \(originalTarget.capitalized).", commandToRegister: cmd)
             }
             
-            // C. Check allowlisted system folders (downloads, documents)
+            // B. Check allowlisted system folders (downloads, documents)
             if target == "downloads" || target == "documents" {
                 MacActionService.shared.openFolder(type: target) { _, _ in }
                 let cmd = Command(
@@ -123,38 +108,57 @@ class CommandRouter {
                 return CommandRoutingResult(responseText: "Opening \(originalTarget.capitalized).", commandToRegister: cmd)
             }
             
-            // D. Check allowlisted applications (safari, chrome, notes, calendar, spotify)
-            let allowedApps = ["safari", "chrome", "notes", "calendar", "spotify"]
-            if allowedApps.contains(target) {
-                // If it is Chrome or Spotify, verify that the application is installed before routing
-                if target == "chrome" {
-                    if !MacActionService.shared.isAppInstalled(bundleId: "com.google.Chrome") {
-                        return CommandRoutingResult(
-                            responseText: "Google Chrome is not installed on this system.",
-                            commandToRegister: nil
-                        )
-                    }
-                } else if target == "spotify" {
-                    if !MacActionService.shared.isAppInstalled(bundleId: "com.spotify.client") {
-                        return CommandRoutingResult(
-                            responseText: "Spotify is not installed on this system.",
-                            commandToRegister: nil
-                        )
-                    }
+            // C. Check allowlisted applications
+            if MacActionService.shared.isAppSupported(name: target) {
+                guard let appInfo = MacActionService.shared.getAppInfo(for: target) else {
+                    return CommandRoutingResult(
+                        responseText: "App '\(originalTarget)' is not in Orbit's safety allowlist. This action is not supported yet.",
+                        commandToRegister: nil
+                    )
+                }
+                
+                // Verify that the application is installed before routing
+                if !MacActionService.shared.isAppInstalled(bundleId: appInfo.bundleId) {
+                    return CommandRoutingResult(
+                        responseText: "\(appInfo.displayName) is not installed on this Mac.",
+                        commandToRegister: nil
+                    )
                 }
                 
                 // Launch the app
-                MacActionService.shared.launchApp(name: target) { _, _ in }
+                MacActionService.shared.launchApp(name: target) { success, message in
+                    if !success {
+                        // Append error message to chat messages list
+                        DispatchQueue.main.async {
+                            ChatService.shared.messages.append(ChatMessage(text: message, sender: .assistant))
+                        }
+                    }
+                }
+                
+                let iconName: String
+                switch target {
+                case "safari": iconName = "safari.fill"
+                case "finder": iconName = "macwindow.on.rectangle"
+                case "calendar": iconName = "calendar"
+                case "notes": iconName = "note.text"
+                case "spotify": iconName = "music.note"
+                case "mail": iconName = "envelope.fill"
+                case "messages": iconName = "message.fill"
+                case "app store": iconName = "bag.fill"
+                case "textedit": iconName = "doc.text.fill"
+                default: iconName = "app.badge.fill"
+                }
+                
                 let cmd = Command(
-                    title: "Open \(originalTarget.capitalized)",
-                    description: "Launch \(originalTarget.capitalized) application",
-                    iconName: target == "calendar" ? "calendar" : (target == "safari" ? "safari.fill" : "app.badge.fill"),
+                    title: "Open \(appInfo.displayName)",
+                    description: "Launch \(appInfo.displayName) application",
+                    iconName: iconName,
                     category: "System"
                 )
-                return CommandRoutingResult(responseText: "Opening \(originalTarget.capitalized).", commandToRegister: cmd)
+                return CommandRoutingResult(responseText: "Opening and focusing \(appInfo.displayName).", commandToRegister: cmd)
             }
             
-            // E. Handle non-allowlisted launch commands
+            // D. Handle non-allowlisted launch commands
             return CommandRoutingResult(
                 responseText: "App '\(originalTarget)' is not in Orbit's safety allowlist. This action is not supported yet.",
                 commandToRegister: nil

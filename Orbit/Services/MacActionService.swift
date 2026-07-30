@@ -15,47 +15,82 @@ class MacActionService {
         "gmail": "https://mail.google.com"
     ]
     
+    struct AppInfo {
+        let displayName: String
+        let bundleId: String
+    }
+    
     // SAFETY DECISION: Allowed applications bundle identifiers.
     // Using bundle identifiers guarantees we query standard Launch Services.
     // This stops system injection of execution scripts or arbitrary shell applications.
-    private let allowedApps = [
-        "safari": "com.apple.Safari",
-        "chrome": "com.google.Chrome",
-        "notes": "com.apple.Notes",
-        "calendar": "com.apple.iCal",
-        "spotify": "com.spotify.client"
+    private let supportedApps: [String: AppInfo] = [
+        "safari": AppInfo(displayName: "Safari", bundleId: "com.apple.Safari"),
+        "finder": AppInfo(displayName: "Finder", bundleId: "com.apple.finder"),
+        "notes": AppInfo(displayName: "Notes", bundleId: "com.apple.Notes"),
+        "calendar": AppInfo(displayName: "Calendar", bundleId: "com.apple.iCal"),
+        "google chrome": AppInfo(displayName: "Google Chrome", bundleId: "com.google.Chrome"),
+        "chrome": AppInfo(displayName: "Google Chrome", bundleId: "com.google.Chrome"),
+        "spotify": AppInfo(displayName: "Spotify", bundleId: "com.spotify.client"),
+        "textedit": AppInfo(displayName: "TextEdit", bundleId: "com.apple.TextEdit"),
+        "mail": AppInfo(displayName: "Mail", bundleId: "com.apple.mail"),
+        "messages": AppInfo(displayName: "Messages", bundleId: "com.apple.MobileSMS"),
+        "app store": AppInfo(displayName: "App Store", bundleId: "com.apple.AppStore")
     ]
+    
+    // Helper to get AppInfo from string key
+    func getAppInfo(for name: String) -> AppInfo? {
+        let cleanName = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        return supportedApps[cleanName]
+    }
+    
+    // Helper to check if name is in allowlist
+    func isAppSupported(name: String) -> Bool {
+        let cleanName = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        return supportedApps[cleanName] != nil
+    }
     
     // Safety check function to verify if the bundle identifier is registered in launch services.
     func isAppInstalled(bundleId: String) -> Bool {
         return NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) != nil
     }
     
-    // Launches allowlisted application bundle identifier.
+    // Launches/focuses allowlisted application bundle identifier.
     func launchApp(name: String, completion: @escaping (Bool, String) -> Void) {
-        let cleanName = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        guard let bundleId = allowedApps[cleanName] else {
+        guard let appInfo = getAppInfo(for: name) else {
             completion(false, "App '\(name)' is not in Orbit's safety allowlist. This action is not supported yet.")
             return
         }
         
+        let bundleId = appInfo.bundleId
+        let displayName = appInfo.displayName
+        
         guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else {
-            let errorMsg = cleanName == "chrome" ? "Google Chrome is not installed on this system." :
-                           cleanName == "spotify" ? "Spotify is not installed on this system." :
-                           "\(name.capitalized) is not installed."
-            completion(false, errorMsg)
+            completion(false, "\(displayName) is not installed on this Mac.")
             return
+        }
+        
+        // If it is already running, bring it to the front using NSRunningApplication activation
+        let runningApps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
+        if let runningApp = runningApps.first {
+            let activated = runningApp.activate(options: [.activateIgnoringOtherApps])
+            if activated {
+                completion(true, "Opening and focusing \(displayName).")
+                return
+            }
         }
         
         // Open the application asynchronously via modern NSWorkspace.OpenConfiguration
         let config = NSWorkspace.OpenConfiguration()
+        config.activates = true
+        
         DispatchQueue.main.async {
             NSWorkspace.shared.openApplication(at: appURL, configuration: config) { _, error in
                 if let error = error {
-                    completion(false, "Failed to launch \(name.capitalized): \(error.localizedDescription)")
+                    let failMsg = "Failed to launch \(displayName): \(error.localizedDescription)"
+                    print("Orbit Error: \(failMsg)")
+                    completion(false, failMsg)
                 } else {
-                    completion(true, "Opening \(name.capitalized).")
+                    completion(true, "Opening and focusing \(displayName).")
                 }
             }
         }

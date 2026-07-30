@@ -34,8 +34,42 @@ class OrbitTests: XCTestCase {
     
     func testOpenFinderCommand() {
         let result = CommandRouter.shared.route("open finder")
-        XCTAssertEqual(result.responseText, "Opening Finder.")
+        XCTAssertEqual(result.responseText, "Opening and focusing Finder.")
         XCTAssertEqual(result.commandToRegister?.title, "Open Finder")
+    }
+    
+    func testOpenSafariCommand() {
+        let result = CommandRouter.shared.route("open safari")
+        XCTAssertEqual(result.responseText, "Opening and focusing Safari.")
+        XCTAssertEqual(result.commandToRegister?.title, "Open Safari")
+    }
+    
+    func testOpenTextEditCommand() {
+        let result = CommandRouter.shared.route("open textedit")
+        XCTAssertEqual(result.responseText, "Opening and focusing TextEdit.")
+        XCTAssertEqual(result.commandToRegister?.title, "Open TextEdit")
+    }
+    
+    func testOpenChromeCommand() {
+        let result = CommandRouter.shared.route("open chrome")
+        if MacActionService.shared.isAppInstalled(bundleId: "com.google.Chrome") {
+            XCTAssertEqual(result.responseText, "Opening and focusing Google Chrome.")
+            XCTAssertEqual(result.commandToRegister?.title, "Open Google Chrome")
+        } else {
+            XCTAssertEqual(result.responseText, "Google Chrome is not installed on this Mac.")
+            XCTAssertNil(result.commandToRegister)
+        }
+    }
+    
+    func testOpenSpotifyCommand() {
+        let result = CommandRouter.shared.route("open spotify")
+        if MacActionService.shared.isAppInstalled(bundleId: "com.spotify.client") {
+            XCTAssertEqual(result.responseText, "Opening and focusing Spotify.")
+            XCTAssertEqual(result.commandToRegister?.title, "Open Spotify")
+        } else {
+            XCTAssertEqual(result.responseText, "Spotify is not installed on this Mac.")
+            XCTAssertNil(result.commandToRegister)
+        }
     }
     
     func testUnknownCommand() {
