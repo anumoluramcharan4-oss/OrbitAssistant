@@ -34,6 +34,9 @@ class SpeechService: ObservableObject {
     private let audioEngine = AVAudioEngine()
     private let speechSynthesizer = AVSpeechSynthesizer()
     
+    private var isStartingRecognition = false
+    private var isTapInstalled = false
+    
     private var silenceTimer: Timer?
     private var silenceDuration: TimeInterval = 0.0
     
@@ -207,7 +210,11 @@ class SpeechService: ObservableObject {
     
     // Starts continuous capture of speech audio and pipes buffers to speech recognition engine
     func startRecognition() {
-        guard !isListening else { return }
+        guard !isStartingRecognition, !isListening, !audioEngine.isRunning, !isTapInstalled else { return }
+        isStartingRecognition = true
+        defer {
+            isStartingRecognition = false
+        }
         
         // Silence any ongoing speech output
         stopSpeaking()
@@ -230,18 +237,20 @@ class SpeechService: ObservableObject {
                         self.errorMessage = error.localizedDescription
                         self.isListening = false
                         self.logDebug("Exact error: Audio engine setup failed: \(error.localizedDescription)")
+                        self.cleanupAudio()
                     }
                 }
             } else {
                 DispatchQueue.main.async {
                     self.isListening = false
+                    self.cleanupAudio()
                 }
             }
         }
     }
     
     private func setupAndStartAudioEngine() throws {
-        // Clear previous tasks
+        // Clear previous tasks safely
         recognitionTask?.cancel()
         recognitionTask = nil
         
@@ -272,22 +281,43 @@ class SpeechService: ObservableObject {
         recognitionRequest.shouldReportPartialResults = true
         
         let inputNode = audioEngine.inputNode
-        let recordingFormat = inputNode.outputFormat(forBus: 0)
         
-        let sampleRate = recordingFormat.sampleRate
+        if isTapInstalled {
+            logDebug("Tap is already installed. Skipping installation.")
+            return
+        }
+        
+        inputNode.removeTap(onBus: 0)
+        audioEngine.reset()
+        
+        let inputFormat = inputNode.inputFormat(forBus: 0)
+        let sampleRate = inputFormat.sampleRate
         DispatchQueue.main.async {
             self.inputNodeSampleRate = sampleRate
         }
-        logDebug("Input-node sample rate: \(sampleRate) Hz")
+        logDebug("Input-node sample rate: \(sampleRate) Hz, channels: \(inputFormat.channelCount)")
         
         // Check hardware safety
         guard sampleRate > 0 else {
-            throw NSError(domain: "OrbitSpeechService", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid audio hardware state: sample rate is zero."])
+            let errorMsg = "No microphone audio detected: sample rate is zero."
+            self.errorMessage = errorMsg
+            self.onError?(errorMsg)
+            self.isListening = false
+            self.cleanupAudio()
+            return
         }
         
-        // Clean tap and hook into the bus
-        inputNode.removeTap(onBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] (buffer, _) in
+        guard inputFormat.channelCount > 0 else {
+            let errorMsg = "No microphone audio detected: channel count is zero."
+            self.errorMessage = errorMsg
+            self.onError?(errorMsg)
+            self.isListening = false
+            self.cleanupAudio()
+            return
+        }
+        
+        // Install the tap only once with nil format to prevent configuration crash
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] (buffer, _) in
             guard let self = self else { return }
             
             // Append real audio buffer
@@ -326,6 +356,8 @@ class SpeechService: ObservableObject {
             }
         }
         
+        self.isTapInstalled = true
+        
         audioEngine.prepare()
         try audioEngine.start()
         
@@ -343,6 +375,7 @@ class SpeechService: ObservableObject {
                     DispatchQueue.main.async {
                         self.errorMessage = "No microphone audio detected. Check Orbit microphone permission and your Mac input device."
                         self.logDebug("No audio detected for 3 seconds. Checking configuration.")
+                        self.stopRecognition()
                     }
                 }
             } else {
@@ -403,8 +436,16 @@ class SpeechService: ObservableObject {
         if audioEngine.isRunning {
             audioEngine.stop()
         }
-        audioEngine.inputNode.removeTap(onBus: 0)
+        
+        if isTapInstalled {
+            audioEngine.inputNode.removeTap(onBus: 0)
+            isTapInstalled = false
+        }
+        
+        recognitionRequest?.endAudio()
         recognitionRequest = nil
+        
+        recognitionTask?.cancel()
         recognitionTask = nil
         
         DispatchQueue.main.async {
@@ -414,8 +455,6 @@ class SpeechService: ObservableObject {
     
     // Stops listening and tears down audioEngine taps, awaiting the final callback result
     func stopRecognition() {
-        guard isListening || audioEngine.isRunning else { return }
-        
         logDebug("Manually stopping recognition. Waiting for final callback...")
         
         self.silenceTimer?.invalidate()
@@ -424,7 +463,11 @@ class SpeechService: ObservableObject {
         if audioEngine.isRunning {
             audioEngine.stop()
         }
-        audioEngine.inputNode.removeTap(onBus: 0)
+        
+        if isTapInstalled {
+            audioEngine.inputNode.removeTap(onBus: 0)
+            isTapInstalled = false
+        }
         
         recognitionRequest?.endAudio()
         recognitionTask?.finish()
