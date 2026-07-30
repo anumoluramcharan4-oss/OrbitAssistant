@@ -1,0 +1,41 @@
+name: Orbit
+options:
+  bundleIdPrefix: com.orbit
+  createIntermediateGroups: true
+targets:
+  Orbit:
+    type: application
+    platform: macOS
+    deploymentTarget: "13.0"
+    entitlements:
+      path: Orbit/Orbit.entitlements
+    sources:
+      - Orbit
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.orbit.Orbit
+      INFOPLIST_KEY_CFBundleDisplayName: Orbit
+      INFOPLIST_KEY_LSMinimumSystemVersion: "13.0"
+      SWIFT_VERSION: "5.9"
+      INFOPLIST_KEY_NSPrincipalClass: NSApplication
+      GENERATE_INFOPLIST_FILE: YES
+      MARKETING_VERSION: "1.0"
+      CURRENT_PROJECT_VERSION: "1"
+      CODE_SIGN_IDENTITY: ""
+      CODE_SIGNING_REQUIRED: NO
+      INFOPLIST_KEY_NSMicrophoneUsageDescription: "Orbit uses your microphone to listen to voice commands."
+      INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "Orbit converts your voice commands into text."
+      INFOPLIST_KEY_NSRemindersUsageDescription: "Orbit uses Reminders to schedule voice alerts and task reminders."
+      INFOPLIST_KEY_NSCalendarsUsageDescription: "Orbit reads today's calendar events to generate your daily briefing."
+  OrbitTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - OrbitTests
+    dependencies:
+      - target: Orbit
+    settings:
+      SWIFT_VERSION: "5.9"
+      CODE_SIGN_IDENTITY: ""
+      CODE_SIGNING_REQUIRED: NO
+      CODE_SIGNING_ALLOWED: NO
