@@ -39,6 +39,7 @@ class SpeechService: ObservableObject {
     
     private var silenceTimer: Timer?
     private var silenceDuration: TimeInterval = 0.0
+    private var bufferTimeoutTimer: Timer?
     
     private init() {}
     
@@ -56,7 +57,7 @@ class SpeechService: ObservableObject {
     
     // Checks permissions sequentially and triggers completion on main thread.
     // Explicitly avoids setting any listening flags until both are authorized.
-    func checkPermissions(completion: @escaping (Bool) -> Void) {
+    func checkPermissions(completion: @escaping (Bool, String?) -> Void) {
         let speechStatus = SFSpeechRecognizer.authorizationStatus()
         let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         
@@ -89,27 +90,29 @@ class SpeechService: ObservableObject {
         logDebug("Speech-recognition permission status: \(speechStatusStr)")
         
         if speechStatus == .authorized && micStatus == .authorized {
-            completion(true)
+            completion(true, nil)
             return
         }
         
         if speechStatus == .denied || speechStatus == .restricted {
+            let errorMsg = "Speech recognition permission denied."
             DispatchQueue.main.async {
-                self.errorMessage = "Speech Recognition permission is required."
+                self.errorMessage = errorMsg
                 self.isListening = false
             }
-            logDebug("Exact error: Speech recognition permission is denied or restricted.")
-            completion(false)
+            logDebug("Exact error: \(errorMsg)")
+            completion(false, errorMsg)
             return
         }
         
         if micStatus == .denied || micStatus == .restricted {
+            let errorMsg = "Microphone permission denied."
             DispatchQueue.main.async {
-                self.errorMessage = "Microphone permission is required."
+                self.errorMessage = errorMsg
                 self.isListening = false
             }
-            logDebug("Exact error: Microphone permission is denied or restricted.")
-            completion(false)
+            logDebug("Exact error: \(errorMsg)")
+            completion(false, errorMsg)
             return
         }
         
@@ -138,22 +141,24 @@ class SpeechService: ObservableObject {
                         self.micPermissionStatus = micGrantedStr
                         if micGranted {
                             self.logDebug("Microphone access granted by user.")
-                            completion(true)
+                            completion(true, nil)
                         } else {
-                            self.errorMessage = "Microphone permission is required."
+                            let errorMsg = "Microphone permission denied."
+                            self.errorMessage = errorMsg
                             self.isListening = false
-                            self.logDebug("Exact error: Microphone access denied by user.")
-                            completion(false)
+                            self.logDebug("Exact error: \(errorMsg)")
+                            completion(false, errorMsg)
                         }
                     }
                 }
             } else {
                 DispatchQueue.main.async {
-                    self.errorMessage = "Speech Recognition permission is required."
+                    let errorMsg = "Speech recognition permission denied."
+                    self.errorMessage = errorMsg
                     self.isListening = false
+                    self.logDebug("Exact error: \(errorMsg)")
+                    completion(false, errorMsg)
                 }
-                self.logDebug("Exact error: Speech recognition access denied by user.")
-                completion(false)
             }
         }
     }
@@ -210,7 +215,16 @@ class SpeechService: ObservableObject {
     
     // Starts continuous capture of speech audio and pipes buffers to speech recognition engine
     func startRecognition() {
-        guard !isStartingRecognition, !isListening, !audioEngine.isRunning, !isTapInstalled else { return }
+        if isStartingRecognition || isListening || audioEngine.isRunning || isTapInstalled {
+            let errorMsg = "Recording already in progress."
+            DispatchQueue.main.async {
+                self.errorMessage = errorMsg
+                self.onError?(errorMsg)
+            }
+            logDebug("startRecognition early return: \(errorMsg)")
+            return
+        }
+        
         isStartingRecognition = true
         defer {
             isStartingRecognition = false
@@ -227,22 +241,27 @@ class SpeechService: ObservableObject {
             self.micLevel = 0.0
         }
         
-        checkPermissions { [weak self] granted in
+        checkPermissions { [weak self] granted, errorMsg in
             guard let self = self else { return }
             if granted {
                 DispatchQueue.main.async {
                     do {
                         try self.setupAndStartAudioEngine()
                     } catch {
-                        self.errorMessage = error.localizedDescription
+                        let finalError = "Audio engine failed to start: \(error.localizedDescription)"
+                        self.errorMessage = finalError
                         self.isListening = false
-                        self.logDebug("Exact error: Audio engine setup failed: \(error.localizedDescription)")
+                        self.onError?(finalError)
+                        self.logDebug("Exact error: \(finalError)")
                         self.cleanupAudio()
                     }
                 }
             } else {
                 DispatchQueue.main.async {
+                    let finalError = errorMsg ?? "Microphone or Speech Recognition permission denied."
+                    self.errorMessage = finalError
                     self.isListening = false
+                    self.onError?(finalError)
                     self.cleanupAudio()
                 }
             }
@@ -258,6 +277,8 @@ class SpeechService: ObservableObject {
             let errorMsg = "SFSpeechRecognizer is unavailable."
             DispatchQueue.main.async {
                 self.recognizerAvailable = false
+                self.errorMessage = errorMsg
+                self.onError?(errorMsg)
             }
             throw NSError(domain: "OrbitSpeechService", code: 3, userInfo: [NSLocalizedDescriptionKey: errorMsg])
         }
@@ -270,6 +291,10 @@ class SpeechService: ObservableObject {
         
         guard isAvail else {
             let errorMsg = "SFSpeechRecognizer is unavailable."
+            DispatchQueue.main.async {
+                self.errorMessage = errorMsg
+                self.onError?(errorMsg)
+            }
             throw NSError(domain: "OrbitSpeechService", code: 4, userInfo: [NSLocalizedDescriptionKey: errorMsg])
         }
         
@@ -344,6 +369,8 @@ class SpeechService: ObservableObject {
             DispatchQueue.main.async {
                 if !self.isListening {
                     self.isListening = true
+                    self.bufferTimeoutTimer?.invalidate()
+                    self.bufferTimeoutTimer = nil
                     self.logDebug("Audio engine started receiving buffers. Listening state activated.")
                 }
                 self.micLevel = min(max(rms * 5.0, 0.0), 1.0)
@@ -362,6 +389,21 @@ class SpeechService: ObservableObject {
         try audioEngine.start()
         
         logDebug("Audio engine started successfully. Awaiting first audio buffers...")
+        
+        // Start buffer timeout timer of 1.0 second
+        self.bufferTimeoutTimer?.invalidate()
+        DispatchQueue.main.async {
+            self.bufferTimeoutTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
+                guard let self = self else { return }
+                if !self.isListening {
+                    self.logDebug("No audio buffers received within 1 second. Timing out.")
+                    let errorMsg = "No microphone audio detected. Check Orbit microphone permission and your Mac input device."
+                    self.errorMessage = errorMsg
+                    self.onError?(errorMsg)
+                    self.cleanupAudio()
+                }
+            }
+        }
         
         // Initialize silence timer
         self.silenceDuration = 0.0
@@ -430,6 +472,9 @@ class SpeechService: ObservableObject {
     }
     
     private func cleanupAudio() {
+        self.bufferTimeoutTimer?.invalidate()
+        self.bufferTimeoutTimer = nil
+        
         self.silenceTimer?.invalidate()
         self.silenceTimer = nil
         
@@ -456,6 +501,9 @@ class SpeechService: ObservableObject {
     // Stops listening and tears down audioEngine taps, awaiting the final callback result
     func stopRecognition() {
         logDebug("Manually stopping recognition. Waiting for final callback...")
+        
+        self.bufferTimeoutTimer?.invalidate()
+        self.bufferTimeoutTimer = nil
         
         self.silenceTimer?.invalidate()
         self.silenceTimer = nil

@@ -78,6 +78,18 @@ class OrbitTests: XCTestCase {
         XCTAssertNil(result.commandToRegister)
     }
     
+    func testOpenSafariAndSearch() {
+        let result = CommandRouter.shared.route("open safari and search best laptops")
+        XCTAssertEqual(result.responseText, "Opening Safari and searching for \"best laptops\".")
+        XCTAssertEqual(result.commandToRegister?.title, "Search Safari: best laptops")
+    }
+    
+    func testSearchAmazon() {
+        let result = CommandRouter.shared.route("search Amazon for headphones")
+        XCTAssertEqual(result.responseText, "Searching Amazon for \"headphones\".")
+        XCTAssertEqual(result.commandToRegister?.title, "Amazon Search: headphones")
+    }
+    
     // MARK: - Command History Tests
     
     func testCommandHistorySave() {

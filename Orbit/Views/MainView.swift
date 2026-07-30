@@ -156,7 +156,7 @@ struct MainView: View {
                                     withAnimation {
                                         showMicDiagnostic.toggle()
                                         if showMicDiagnostic {
-                                            speechService.checkPermissions { _ in }
+                                            speechService.checkPermissions { _, _ in }
                                         }
                                     }
                                 }) {

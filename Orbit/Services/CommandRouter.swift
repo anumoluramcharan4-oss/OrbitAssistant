@@ -59,20 +59,170 @@ class CommandRouter {
             return CommandRoutingResult(responseText: response, commandToRegister: cmd)
         }
         
-        // 4. Handle "search for [terms]"
+        // 4. Handle Search Commands
+        
+        // A. "open safari and search [query]"
+        if normalized.hasPrefix("open safari and search ") {
+            let query = String(trimmed.dropFirst("open safari and search ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !query.isEmpty {
+                MacActionService.shared.searchInBrowser(bundleId: "com.apple.Safari", query: query) { success, message in
+                    if !success {
+                        DispatchQueue.main.async {
+                            ChatService.shared.messages.append(ChatMessage(text: message, sender: .assistant))
+                        }
+                    }
+                }
+                let cmd = Command(
+                    title: "Search Safari: \(query)",
+                    description: "Search Google using Safari browser",
+                    iconName: "safari.fill",
+                    category: "Productivity"
+                )
+                return CommandRoutingResult(responseText: "Opening Safari and searching for \"\(query)\".", commandToRegister: cmd)
+            } else {
+                return CommandRoutingResult(responseText: "Search query is empty.", commandToRegister: nil)
+            }
+        }
+        
+        // B. "open chrome and search [query]"
+        if normalized.hasPrefix("open chrome and search ") {
+            let query = String(trimmed.dropFirst("open chrome and search ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !query.isEmpty {
+                if !MacActionService.shared.isAppInstalled(bundleId: "com.google.Chrome") {
+                    return CommandRoutingResult(
+                        responseText: "Google Chrome is not installed on this Mac.",
+                        commandToRegister: nil
+                    )
+                }
+                MacActionService.shared.searchInBrowser(bundleId: "com.google.Chrome", query: query) { success, message in
+                    if !success {
+                        DispatchQueue.main.async {
+                            ChatService.shared.messages.append(ChatMessage(text: message, sender: .assistant))
+                        }
+                    }
+                }
+                let cmd = Command(
+                    title: "Search Chrome: \(query)",
+                    description: "Search Google using Google Chrome browser",
+                    iconName: "globe",
+                    category: "Productivity"
+                )
+                return CommandRoutingResult(responseText: "Opening Google Chrome and searching for \"\(query)\".", commandToRegister: cmd)
+            } else {
+                return CommandRoutingResult(responseText: "Search query is empty.", commandToRegister: nil)
+            }
+        }
+        
+        // C. "search amazon for [query]"
+        if normalized.hasPrefix("search amazon for ") {
+            let query = String(trimmed.dropFirst("search amazon for ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !query.isEmpty {
+                MacActionService.shared.searchWebsite(urlTemplate: "https://www.amazon.com/s", query: query) { success, message in
+                    if !success {
+                        DispatchQueue.main.async {
+                            ChatService.shared.messages.append(ChatMessage(text: message, sender: .assistant))
+                        }
+                    }
+                }
+                let cmd = Command(
+                    title: "Amazon Search: \(query)",
+                    description: "Search Amazon products results",
+                    iconName: "magnifyingglass",
+                    category: "Productivity"
+                )
+                return CommandRoutingResult(responseText: "Searching Amazon for \"\(query)\".", commandToRegister: cmd)
+            } else {
+                return CommandRoutingResult(responseText: "Search query is empty.", commandToRegister: nil)
+            }
+        }
+        
+        // D. "search youtube for [query]"
+        if normalized.hasPrefix("search youtube for ") {
+            let query = String(trimmed.dropFirst("search youtube for ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !query.isEmpty {
+                MacActionService.shared.searchWebsite(urlTemplate: "https://www.youtube.com/results", query: query) { success, message in
+                    if !success {
+                        DispatchQueue.main.async {
+                            ChatService.shared.messages.append(ChatMessage(text: message, sender: .assistant))
+                        }
+                    }
+                }
+                let cmd = Command(
+                    title: "YouTube Search: \(query)",
+                    description: "Search YouTube videos results",
+                    iconName: "play.rectangle.fill",
+                    category: "Productivity"
+                )
+                return CommandRoutingResult(responseText: "Searching YouTube for \"\(query)\".", commandToRegister: cmd)
+            } else {
+                return CommandRoutingResult(responseText: "Search query is empty.", commandToRegister: nil)
+            }
+        }
+        
+        // E. "search [app] for [query]" (for unsupported desktop apps)
+        let unsupportedSearchApps = ["spotify", "notes", "calendar", "mail", "messages", "app store", "textedit", "finder"]
+        for app in unsupportedSearchApps {
+            if normalized.hasPrefix("search \(app) for ") {
+                let appName: String
+                switch app {
+                case "spotify": appName = "Spotify"
+                case "notes": appName = "Notes"
+                case "calendar": appName = "Calendar"
+                case "mail": appName = "Mail"
+                case "messages": appName = "Messages"
+                case "app store": appName = "App Store"
+                case "textedit": appName = "TextEdit"
+                case "finder": appName = "Finder"
+                default: appName = app.capitalized
+                }
+                return CommandRoutingResult(
+                    responseText: "I can open \(appName), but I cannot control its internal search yet. Try a web search instead.",
+                    commandToRegister: nil
+                )
+            }
+        }
+        
+        // F. "search for [query]"
         if normalized.hasPrefix("search for ") {
             let terms = String(trimmed.dropFirst(11)).trimmingCharacters(in: .whitespacesAndNewlines)
             if !terms.isEmpty {
-                // Trigger Google search query in background
-                MacActionService.shared.searchGoogle(terms: terms) { _, _ in }
-                let response = "Searching Google for \"\(terms)\"."
+                MacActionService.shared.searchGoogle(terms: terms) { success, message in
+                    if !success {
+                        DispatchQueue.main.async {
+                            ChatService.shared.messages.append(ChatMessage(text: message, sender: .assistant))
+                        }
+                    }
+                }
                 let cmd = Command(
                     title: "Search: \(terms)",
                     description: "Search Google browser results",
                     iconName: "magnifyingglass",
                     category: "Productivity"
                 )
-                return CommandRoutingResult(responseText: response, commandToRegister: cmd)
+                return CommandRoutingResult(responseText: "Searching Google for \"\(terms)\".", commandToRegister: cmd)
+            } else {
+                return CommandRoutingResult(responseText: "Google search query is empty.", commandToRegister: nil)
+            }
+        }
+        
+        // G. "search [query]"
+        if normalized.hasPrefix("search ") {
+            let terms = String(trimmed.dropFirst(7)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !terms.isEmpty {
+                MacActionService.shared.searchGoogle(terms: terms) { success, message in
+                    if !success {
+                        DispatchQueue.main.async {
+                            ChatService.shared.messages.append(ChatMessage(text: message, sender: .assistant))
+                        }
+                    }
+                }
+                let cmd = Command(
+                    title: "Search: \(terms)",
+                    description: "Search Google browser results",
+                    iconName: "magnifyingglass",
+                    category: "Productivity"
+                )
+                return CommandRoutingResult(responseText: "Searching Google for \"\(terms)\".", commandToRegister: cmd)
             } else {
                 return CommandRoutingResult(responseText: "Google search query is empty.", commandToRegister: nil)
             }
