@@ -338,6 +338,242 @@ struct MainView: View {
                                         .id(message.id)
                                         
                                         Spacer()
+                                    } else if message.isFileConfirmation, let filePath = message.filePath {
+                                        VStack(alignment: .leading, spacing: 10) {
+                                            HStack(spacing: 6) {
+                                                Image(systemName: "doc.badge.gearshape.fill")
+                                                    .foregroundColor(.orange)
+                                                Text("Open local file?")
+                                                    .font(.system(size: 13, weight: .bold))
+                                                    .foregroundColor(.white)
+                                            }
+                                            
+                                            Text("'\(URL(fileURLWithPath: filePath).lastPathComponent)'")
+                                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                                                .foregroundColor(.white.opacity(0.9))
+                                                .padding(.leading, 4)
+                                            
+                                            Text(filePath)
+                                                .font(.system(size: 9, design: .monospaced))
+                                                .foregroundColor(.white.opacity(0.5))
+                                                .padding(.leading, 4)
+                                                .lineLimit(2)
+                                            
+                                            Text("⚠️ This file is located outside standard folders (Documents/Downloads).")
+                                                .font(.system(size: 10))
+                                                .foregroundColor(.orange)
+                                                .padding(.leading, 4)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                            
+                                            HStack(spacing: 12) {
+                                                Button(action: {
+                                                    chatService.confirmOpenFile(path: filePath, messageId: message.id)
+                                                }) {
+                                                    Text("Open File")
+                                                        .font(.system(size: 11, weight: .bold))
+                                                        .foregroundColor(.black)
+                                                        .padding(.horizontal, 14)
+                                                        .padding(.vertical, 6)
+                                                        .background(Color.orange)
+                                                        .cornerRadius(8)
+                                                }
+                                                .buttonStyle(.plain)
+                                                .accessibilityLabel("Confirm opening the local file")
+                                                
+                                                Button(action: {
+                                                    chatService.cancelOpenFile(messageId: message.id)
+                                                }) {
+                                                    Text("Cancel")
+                                                        .font(.system(size: 11, weight: .medium))
+                                                        .foregroundColor(.white.opacity(0.7))
+                                                        .padding(.horizontal, 14)
+                                                        .padding(.vertical, 6)
+                                                        .background(Color.white.opacity(0.08))
+                                                        .cornerRadius(8)
+                                                        .overlay(
+                                                            RoundedRectangle(cornerRadius: 8)
+                                                                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                                                        )
+                                                }
+                                                .buttonStyle(.plain)
+                                                .accessibilityLabel("Cancel opening the local file")
+                                            }
+                                            .padding(.top, 4)
+                                        }
+                                        .padding(14)
+                                        .background(Color.white.opacity(0.05))
+                                        .cornerRadius(16)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 16)
+                                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                        )
+                                        .frame(maxWidth: 320, alignment: .leading)
+                                        .id(message.id)
+                                        
+                                        Spacer()
+                                    } else if message.isSleepConfirmation {
+                                        VStack(alignment: .leading, spacing: 10) {
+                                            HStack(spacing: 6) {
+                                                Image(systemName: "moon.zzz.fill")
+                                                    .foregroundColor(.blue)
+                                                Text("Confirm Sleep Mac?")
+                                                    .font(.system(size: 13, weight: .bold))
+                                                    .foregroundColor(.white)
+                                            }
+                                            
+                                            Text("Are you sure you want to put your Mac to sleep?")
+                                                .font(.system(size: 11))
+                                                .foregroundColor(.white.opacity(0.8))
+                                                .padding(.leading, 4)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                            
+                                            HStack(spacing: 12) {
+                                                Button(action: {
+                                                    chatService.confirmSleep(messageId: message.id)
+                                                }) {
+                                                    Text("Sleep")
+                                                        .font(.system(size: 11, weight: .bold))
+                                                        .foregroundColor(.black)
+                                                        .padding(.horizontal, 14)
+                                                        .padding(.vertical, 6)
+                                                        .background(Color.blue)
+                                                        .cornerRadius(8)
+                                                }
+                                                .buttonStyle(.plain)
+                                                
+                                                Button(action: {
+                                                    chatService.cancelSleep(messageId: message.id)
+                                                }) {
+                                                    Text("Cancel")
+                                                        .font(.system(size: 11, weight: .medium))
+                                                        .foregroundColor(.white.opacity(0.7))
+                                                        .padding(.horizontal, 14)
+                                                        .padding(.vertical, 6)
+                                                        .background(Color.white.opacity(0.08))
+                                                        .cornerRadius(8)
+                                                        .overlay(
+                                                            RoundedRectangle(cornerRadius: 8)
+                                                                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                                                        )
+                                                }
+                                                .buttonStyle(.plain)
+                                            }
+                                            .padding(.top, 4)
+                                        }
+                                        .padding(14)
+                                        .background(Color.white.opacity(0.05))
+                                        .cornerRadius(16)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 16)
+                                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                        )
+                                        .frame(maxWidth: 320, alignment: .leading)
+                                        .id(message.id)
+                                        
+                                        Spacer()
+                                    } else if message.isForceQuitConfirmation, let appName = message.forceQuitAppName {
+                                        VStack(alignment: .leading, spacing: 10) {
+                                            HStack(spacing: 6) {
+                                                Image(systemName: "exclamationmark.triangle.fill")
+                                                    .foregroundColor(.red)
+                                                Text("Force Quit \(appName.capitalized)?")
+                                                    .font(.system(size: 13, weight: .bold))
+                                                    .foregroundColor(.white)
+                                            }
+                                            
+                                            Text("Some instances of \(appName.capitalized) failed to quit. Do you want to force quit?")
+                                                .font(.system(size: 11))
+                                                .foregroundColor(.white.opacity(0.8))
+                                                .padding(.leading, 4)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                            
+                                            HStack(spacing: 12) {
+                                                Button(action: {
+                                                    chatService.confirmForceQuit(appName: appName, messageId: message.id)
+                                                }) {
+                                                    Text("Force Quit")
+                                                        .font(.system(size: 11, weight: .bold))
+                                                        .foregroundColor(.white)
+                                                        .padding(.horizontal, 14)
+                                                        .padding(.vertical, 6)
+                                                        .background(Color.red)
+                                                        .cornerRadius(8)
+                                                }
+                                                .buttonStyle(.plain)
+                                                
+                                                Button(action: {
+                                                    chatService.cancelForceQuit(messageId: message.id)
+                                                }) {
+                                                    Text("Cancel")
+                                                        .font(.system(size: 11, weight: .medium))
+                                                        .foregroundColor(.white.opacity(0.7))
+                                                        .padding(.horizontal, 14)
+                                                        .padding(.vertical, 6)
+                                                        .background(Color.white.opacity(0.08))
+                                                        .cornerRadius(8)
+                                                        .overlay(
+                                                            RoundedRectangle(cornerRadius: 8)
+                                                                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                                                        )
+                                                }
+                                                .buttonStyle(.plain)
+                                            }
+                                            .padding(.top, 4)
+                                        }
+                                        .padding(14)
+                                        .background(Color.white.opacity(0.05))
+                                        .cornerRadius(16)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 16)
+                                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                        )
+                                        .frame(maxWidth: 320, alignment: .leading)
+                                        .id(message.id)
+                                        
+                                        Spacer()
+                                    } else if message.isAccessibilitySettingsCard {
+                                        VStack(alignment: .leading, spacing: 10) {
+                                            HStack(spacing: 6) {
+                                                Image(systemName: "hand.raised.fill")
+                                                    .foregroundColor(.purple)
+                                                Text("Accessibility Permission")
+                                                    .font(.system(size: 13, weight: .bold))
+                                                    .foregroundColor(.white)
+                                            }
+                                            
+                                            Text("Orbit needs Accessibility permission to control applications.")
+                                                .font(.system(size: 11))
+                                                .foregroundColor(.white.opacity(0.8))
+                                                .padding(.leading, 4)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                            
+                                            HStack(spacing: 12) {
+                                                Button(action: {
+                                                    chatService.openAccessibilitySettings(messageId: message.id)
+                                                }) {
+                                                    Text("Open System Settings")
+                                                        .font(.system(size: 11, weight: .bold))
+                                                        .foregroundColor(.black)
+                                                        .padding(.horizontal, 14)
+                                                        .padding(.vertical, 6)
+                                                        .background(Color.purple)
+                                                        .cornerRadius(8)
+                                                }
+                                                .buttonStyle(.plain)
+                                            }
+                                            .padding(.top, 4)
+                                        }
+                                        .padding(14)
+                                        .background(Color.white.opacity(0.05))
+                                        .cornerRadius(16)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 16)
+                                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                        )
+                                        .frame(maxWidth: 320, alignment: .leading)
+                                        .id(message.id)
+                                        
+                                        Spacer()
                                     } else {
                                         if message.sender == .user {
                                             Spacer()

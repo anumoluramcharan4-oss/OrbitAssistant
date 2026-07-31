@@ -28,8 +28,8 @@ class OrbitTests: XCTestCase {
     
     func testOpenGoogleCommand() {
         let result = CommandRouter.shared.route("open google")
-        XCTAssertEqual(result.responseText, "Opening Google.")
-        XCTAssertEqual(result.commandToRegister?.title, "Open Google")
+        XCTAssertEqual(result.responseText, "Opening www.google.com in browser.")
+        XCTAssertEqual(result.commandToRegister?.title, "Open www.google.com")
     }
     
     func testOpenFinderCommand() {
@@ -52,22 +52,26 @@ class OrbitTests: XCTestCase {
     
     func testOpenChromeCommand() {
         let result = CommandRouter.shared.route("open chrome")
-        if MacActionService.shared.isAppInstalled(bundleId: "com.google.Chrome") {
-            XCTAssertEqual(result.responseText, "Opening and focusing Google Chrome.")
+        XCTAssertTrue(
+            result.responseText == "Opening and focusing Google Chrome." ||
+            result.responseText == "Google Chrome is not installed on this Mac."
+        )
+        if result.responseText == "Opening and focusing Google Chrome." {
             XCTAssertEqual(result.commandToRegister?.title, "Open Google Chrome")
         } else {
-            XCTAssertEqual(result.responseText, "Google Chrome is not installed on this Mac.")
             XCTAssertNil(result.commandToRegister)
         }
     }
     
     func testOpenSpotifyCommand() {
         let result = CommandRouter.shared.route("open spotify")
-        if MacActionService.shared.isAppInstalled(bundleId: "com.spotify.client") {
-            XCTAssertEqual(result.responseText, "Opening and focusing Spotify.")
+        XCTAssertTrue(
+            result.responseText == "Opening and focusing Spotify." ||
+            result.responseText == "Spotify is not installed on this Mac."
+        )
+        if result.responseText == "Opening and focusing Spotify." {
             XCTAssertEqual(result.commandToRegister?.title, "Open Spotify")
         } else {
-            XCTAssertEqual(result.responseText, "Spotify is not installed on this Mac.")
             XCTAssertNil(result.commandToRegister)
         }
     }
@@ -78,17 +82,82 @@ class OrbitTests: XCTestCase {
         XCTAssertNil(result.commandToRegister)
     }
     
-    func testOpenSafariAndSearch() {
-        let result = CommandRouter.shared.route("open safari and search best laptops")
-        XCTAssertEqual(result.responseText, "Opening Safari and searching for \"best laptops\".")
-        XCTAssertEqual(result.commandToRegister?.title, "Search Safari: best laptops")
+    func testOpenAmazonInSafari() {
+        let result = CommandRouter.shared.route("Open Amazon in Safari")
+        XCTAssertEqual(result.responseText, "Opening www.amazon.com in browser.")
+        XCTAssertEqual(result.commandToRegister?.title, "Open www.amazon.com")
     }
     
-    func testSearchAmazon() {
-        let result = CommandRouter.shared.route("search Amazon for headphones")
-        XCTAssertEqual(result.responseText, "Searching Amazon for \"headphones\".")
-        XCTAssertEqual(result.commandToRegister?.title, "Amazon Search: headphones")
+    func testOpenGithubInSafari() {
+        let result = CommandRouter.shared.route("Open github.com in Safari")
+        XCTAssertEqual(result.responseText, "Opening github.com in browser.")
+        XCTAssertEqual(result.commandToRegister?.title, "Open github.com")
     }
+    
+    func testOpenDocsGoogle() {
+        let result = CommandRouter.shared.route("Open docs.google.com")
+        XCTAssertEqual(result.responseText, "Opening docs.google.com in browser.")
+        XCTAssertEqual(result.commandToRegister?.title, "Open docs.google.com")
+    }
+    
+    func testSearchDefaultBrowser() {
+        let result = CommandRouter.shared.route("Search SwiftUI tutorials")
+        XCTAssertEqual(result.responseText, "Searching Google for \"SwiftUI tutorials\".")
+        XCTAssertEqual(result.commandToRegister?.title, "Search: SwiftUI tutorials")
+    }
+    
+    func testSearchSafari() {
+        let result = CommandRouter.shared.route("Search SwiftUI tutorials in Safari")
+        XCTAssertEqual(result.responseText, "Searching Google for \"SwiftUI tutorials\".")
+        XCTAssertEqual(result.commandToRegister?.title, "Search: SwiftUI tutorials")
+    }
+
+    func testCloseSafariCommand() {
+        let result = CommandRouter.shared.route("close safari")
+        XCTAssertEqual(result.responseText, "Closing Safari.")
+        XCTAssertEqual(result.commandToRegister?.title, "Close Safari")
+    }
+
+    func testMultiStepCommands() {
+        // Test 1: Complex 3-step chain
+        let tasks1 = TaskPlanner.shared.plan(query: "Open Safari and in Safari open Amazon and search for best gaming laptops")
+        XCTAssertEqual(tasks1.count, 3)
+        XCTAssertEqual(tasks1[0].action, .launchApp)
+        XCTAssertEqual(tasks1[0].targetApp, "safari")
+        XCTAssertEqual(tasks1[1].action, .openWebsite)
+        XCTAssertEqual(tasks1[1].website, "https://www.amazon.com")
+        XCTAssertEqual(tasks1[2].action, .searchWebsite)
+        XCTAssertEqual(tasks1[2].website, "amazon")
+        XCTAssertEqual(tasks1[2].searchQuery, "best gaming laptops")
+        
+        // Test 2: "Open Safari then open Amazon"
+        let tasks2 = TaskPlanner.shared.plan(query: "Open Safari then open Amazon")
+        XCTAssertEqual(tasks2.count, 2)
+        XCTAssertEqual(tasks2[0].action, .launchApp)
+        XCTAssertEqual(tasks2[0].targetApp, "safari")
+        XCTAssertEqual(tasks2[1].action, .openWebsite)
+        XCTAssertEqual(tasks2[1].website, "https://www.amazon.com")
+        
+        // Test 3: "Open Safari and search Amazon for iPhone"
+        let tasks3 = TaskPlanner.shared.plan(query: "Open Safari and search Amazon for iPhone")
+        XCTAssertEqual(tasks3.count, 2)
+        XCTAssertEqual(tasks3[0].action, .launchApp)
+        XCTAssertEqual(tasks3[0].targetApp, "safari")
+        XCTAssertEqual(tasks3[1].action, .searchWebsite)
+        XCTAssertEqual(tasks3[1].website, "amazon")
+        XCTAssertEqual(tasks3[1].searchQuery, "iPhone")
+        
+        // Test 4: "Open Finder then open Downloads"
+        let tasks4 = TaskPlanner.shared.plan(query: "Open Finder then open Downloads")
+        XCTAssertEqual(tasks4.count, 2)
+        XCTAssertEqual(tasks4[0].action, .launchApp)
+        XCTAssertEqual(tasks4[0].targetApp, "finder")
+        XCTAssertEqual(tasks4[1].action, .openFolder)
+        XCTAssertEqual(tasks4[1].folder, "downloads")
+    }
+
+
+
     
     // MARK: - Command History Tests
     

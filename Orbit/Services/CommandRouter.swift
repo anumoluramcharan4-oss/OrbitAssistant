@@ -4,6 +4,10 @@ import AppKit
 struct CommandRoutingResult {
     let responseText: String
     let commandToRegister: Command?
+    var isFileConfirmation: Bool = false
+    var isSleepConfirmation: Bool = false
+    var filePath: String? = nil
+    var tasks: [Task]? = nil
 }
 
 class CommandRouter {
@@ -11,12 +15,30 @@ class CommandRouter {
     
     private init() {}
     
-    func route(_ query: String) -> CommandRoutingResult {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalized = trimmed.lowercased()
+    private func isPathInStandardDirectories(_ path: String) -> Bool {
+        let expandedPath = (path as NSString).expandingTildeInPath
+        let canonicalPath = URL(fileURLWithPath: expandedPath).path
         
-        // 1. Handle Greetings
-        if normalized == "hello" || normalized == "hi" {
+        if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.path,
+           canonicalPath.hasPrefix(docs) {
+            return true
+        }
+        if let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first?.path,
+           canonicalPath.hasPrefix(downloads) {
+            return true
+        }
+        return false
+    }
+    
+    func route(_ query: String) -> CommandRoutingResult {
+        let normalized = query.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Handle basic queries
+        let isGreeting = normalized.contains("hello") || normalized.contains("hi ") || normalized == "hi" || normalized.contains("hey ") || normalized == "hey" || normalized.contains("greetings")
+        let isTime = normalized.contains("time")
+        let isDate = (normalized.contains("date") || normalized.contains("today") || normalized.contains("calendar")) && !normalized.contains("open")
+        
+        if isGreeting {
             let cmd = Command(
                 title: "Hi",
                 description: "Greet the assistant",
@@ -27,10 +49,7 @@ class CommandRouter {
                 responseText: "Hello! I am Orbit, your native macOS assistant. How can I help you today?",
                 commandToRegister: cmd
             )
-        }
-        
-        // 2. Handle Time Queries
-        if normalized == "what time is it" {
+        } else if isTime {
             let formatter = DateFormatter()
             formatter.timeStyle = .short
             let timeString = formatter.string(from: Date())
@@ -42,10 +61,7 @@ class CommandRouter {
                 category: "System"
             )
             return CommandRoutingResult(responseText: response, commandToRegister: cmd)
-        }
-        
-        // 3. Handle Date Queries
-        if normalized == "what is today's date" || normalized == "what is todays date" {
+        } else if isDate {
             let formatter = DateFormatter()
             formatter.dateStyle = .full
             let dateString = formatter.string(from: Date())
@@ -59,264 +75,308 @@ class CommandRouter {
             return CommandRoutingResult(responseText: response, commandToRegister: cmd)
         }
         
-        // 4. Handle Search Commands
+        // Generate plan
+        let tasks = TaskPlanner.shared.plan(query: query)
         
-        // A. "open safari and search [query]"
-        if normalized.hasPrefix("open safari and search ") {
-            let query = String(trimmed.dropFirst("open safari and search ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !query.isEmpty {
-                MacActionService.shared.searchInBrowser(bundleId: "com.apple.Safari", query: query) { success, message in
-                    if !success {
-                        DispatchQueue.main.async {
-                            ChatService.shared.messages.append(ChatMessage(text: message, sender: .assistant))
-                        }
-                    }
-                }
-                let cmd = Command(
-                    title: "Search Safari: \(query)",
-                    description: "Search Google using Safari browser",
-                    iconName: "safari.fill",
-                    category: "Productivity"
-                )
-                return CommandRoutingResult(responseText: "Opening Safari and searching for \"\(query)\".", commandToRegister: cmd)
-            } else {
-                return CommandRoutingResult(responseText: "Search query is empty.", commandToRegister: nil)
-            }
+        guard !tasks.isEmpty else {
+            let response = "I don’t know how to do that yet, but I’m learning."
+            return CommandRoutingResult(responseText: response, commandToRegister: nil)
         }
         
-        // B. "open chrome and search [query]"
-        if normalized.hasPrefix("open chrome and search ") {
-            let query = String(trimmed.dropFirst("open chrome and search ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !query.isEmpty {
-                if !MacActionService.shared.isAppInstalled(bundleId: "com.google.Chrome") {
-                    return CommandRoutingResult(
-                        responseText: "Google Chrome is not installed on this Mac.",
-                        commandToRegister: nil
-                    )
-                }
-                MacActionService.shared.searchInBrowser(bundleId: "com.google.Chrome", query: query) { success, message in
-                    if !success {
-                        DispatchQueue.main.async {
-                            ChatService.shared.messages.append(ChatMessage(text: message, sender: .assistant))
-                        }
-                    }
-                }
-                let cmd = Command(
-                    title: "Search Chrome: \(query)",
-                    description: "Search Google using Google Chrome browser",
-                    iconName: "globe",
-                    category: "Productivity"
-                )
-                return CommandRoutingResult(responseText: "Opening Google Chrome and searching for \"\(query)\".", commandToRegister: cmd)
-            } else {
-                return CommandRoutingResult(responseText: "Search query is empty.", commandToRegister: nil)
-            }
-        }
-        
-        // C. "search amazon for [query]"
-        if normalized.hasPrefix("search amazon for ") {
-            let query = String(trimmed.dropFirst("search amazon for ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !query.isEmpty {
-                MacActionService.shared.searchWebsite(urlTemplate: "https://www.amazon.com/s", query: query) { success, message in
-                    if !success {
-                        DispatchQueue.main.async {
-                            ChatService.shared.messages.append(ChatMessage(text: message, sender: .assistant))
-                        }
-                    }
-                }
-                let cmd = Command(
-                    title: "Amazon Search: \(query)",
-                    description: "Search Amazon products results",
-                    iconName: "magnifyingglass",
-                    category: "Productivity"
-                )
-                return CommandRoutingResult(responseText: "Searching Amazon for \"\(query)\".", commandToRegister: cmd)
-            } else {
-                return CommandRoutingResult(responseText: "Search query is empty.", commandToRegister: nil)
-            }
-        }
-        
-        // D. "search youtube for [query]"
-        if normalized.hasPrefix("search youtube for ") {
-            let query = String(trimmed.dropFirst("search youtube for ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !query.isEmpty {
-                MacActionService.shared.searchWebsite(urlTemplate: "https://www.youtube.com/results", query: query) { success, message in
-                    if !success {
-                        DispatchQueue.main.async {
-                            ChatService.shared.messages.append(ChatMessage(text: message, sender: .assistant))
-                        }
-                    }
-                }
-                let cmd = Command(
-                    title: "YouTube Search: \(query)",
-                    description: "Search YouTube videos results",
-                    iconName: "play.rectangle.fill",
-                    category: "Productivity"
-                )
-                return CommandRoutingResult(responseText: "Searching YouTube for \"\(query)\".", commandToRegister: cmd)
-            } else {
-                return CommandRoutingResult(responseText: "Search query is empty.", commandToRegister: nil)
-            }
-        }
-        
-        // E. "search [app] for [query]" (for unsupported desktop apps)
-        let unsupportedSearchApps = ["spotify", "notes", "calendar", "mail", "messages", "app store", "textedit", "finder"]
-        for app in unsupportedSearchApps {
-            if normalized.hasPrefix("search \(app) for ") {
-                let appName: String
-                switch app {
-                case "spotify": appName = "Spotify"
-                case "notes": appName = "Notes"
-                case "calendar": appName = "Calendar"
-                case "mail": appName = "Mail"
-                case "messages": appName = "Messages"
-                case "app store": appName = "App Store"
-                case "textedit": appName = "TextEdit"
-                case "finder": appName = "Finder"
-                default: appName = app.capitalized
-                }
+        // Check for sleep confirmation
+        for task in tasks {
+            if task.action == .sleepMac {
                 return CommandRoutingResult(
-                    responseText: "I can open \(appName), but I cannot control its internal search yet. Try a web search instead.",
-                    commandToRegister: nil
+                    responseText: "Sleeping the Mac requires confirmation.",
+                    commandToRegister: nil,
+                    isSleepConfirmation: true,
+                    tasks: tasks
                 )
             }
         }
         
-        // F. "search for [query]"
-        if normalized.hasPrefix("search for ") {
-            let terms = String(trimmed.dropFirst(11)).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !terms.isEmpty {
-                MacActionService.shared.searchGoogle(terms: terms) { success, message in
-                    if !success {
-                        DispatchQueue.main.async {
-                            ChatService.shared.messages.append(ChatMessage(text: message, sender: .assistant))
-                        }
-                    }
-                }
-                let cmd = Command(
-                    title: "Search: \(terms)",
-                    description: "Search Google browser results",
-                    iconName: "magnifyingglass",
-                    category: "Productivity"
-                )
-                return CommandRoutingResult(responseText: "Searching Google for \"\(terms)\".", commandToRegister: cmd)
-            } else {
-                return CommandRoutingResult(responseText: "Google search query is empty.", commandToRegister: nil)
-            }
-        }
-        
-        // G. "search [query]"
-        if normalized.hasPrefix("search ") {
-            let terms = String(trimmed.dropFirst(7)).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !terms.isEmpty {
-                MacActionService.shared.searchGoogle(terms: terms) { success, message in
-                    if !success {
-                        DispatchQueue.main.async {
-                            ChatService.shared.messages.append(ChatMessage(text: message, sender: .assistant))
-                        }
-                    }
-                }
-                let cmd = Command(
-                    title: "Search: \(terms)",
-                    description: "Search Google browser results",
-                    iconName: "magnifyingglass",
-                    category: "Productivity"
-                )
-                return CommandRoutingResult(responseText: "Searching Google for \"\(terms)\".", commandToRegister: cmd)
-            } else {
-                return CommandRoutingResult(responseText: "Google search query is empty.", commandToRegister: nil)
-            }
-        }
-        
-        // 5. Handle "open [target]" commands
-        if normalized.hasPrefix("open ") {
-            let target = String(normalized.dropFirst(5)).trimmingCharacters(in: .whitespacesAndNewlines)
-            let originalTarget = String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespacesAndNewlines)
-            
-            // A. Check allowlisted web addresses (google, youtube, github, gmail)
-            let allowedWebsites = ["google", "youtube", "github", "gmail"]
-            if allowedWebsites.contains(target) {
-                MacActionService.shared.openWebsite(name: target) { _, _ in }
-                let cmd = Command(
-                    title: "Open \(originalTarget.capitalized)",
-                    description: "Load \(originalTarget.capitalized) website",
-                    iconName: target == "youtube" ? "play.rectangle.fill" : "safari.fill",
-                    category: "Navigation"
-                )
-                return CommandRoutingResult(responseText: "Opening \(originalTarget.capitalized).", commandToRegister: cmd)
-            }
-            
-            // B. Check allowlisted system folders (downloads, documents)
-            if target == "downloads" || target == "documents" {
-                MacActionService.shared.openFolder(type: target) { _, _ in }
-                let cmd = Command(
-                    title: "Open \(originalTarget.capitalized)",
-                    description: "Open \(originalTarget.capitalized) folder",
-                    iconName: "folder.fill",
-                    category: "System"
-                )
-                return CommandRoutingResult(responseText: "Opening \(originalTarget.capitalized).", commandToRegister: cmd)
-            }
-            
-            // C. Check allowlisted applications
-            if MacActionService.shared.isAppSupported(name: target) {
-                guard let appInfo = MacActionService.shared.getAppInfo(for: target) else {
+        // Check for file confirmation
+        for task in tasks {
+            if task.action == .openFile, let filePath = task.file {
+                let expandedPath = (filePath as NSString).expandingTildeInPath
+                let canonicalPath = URL(fileURLWithPath: expandedPath).path
+                
+                if !FileManager.default.fileExists(atPath: canonicalPath) {
                     return CommandRoutingResult(
-                        responseText: "App '\(originalTarget)' is not in Orbit's safety allowlist. This action is not supported yet.",
+                        responseText: "File not found at: \(filePath)",
                         commandToRegister: nil
                     )
                 }
                 
-                // Verify that the application is installed before routing
-                if !MacActionService.shared.isAppInstalled(bundleId: appInfo.bundleId) {
+                if !isPathInStandardDirectories(canonicalPath) {
+                    return CommandRoutingResult(
+                        responseText: "Opening \(URL(fileURLWithPath: canonicalPath).lastPathComponent) requires confirmation.",
+                        commandToRegister: nil,
+                        isFileConfirmation: true,
+                        filePath: canonicalPath,
+                        tasks: tasks
+                    )
+                }
+            }
+        }
+        
+        // Single task backwards compatibility and clean responses
+        if tasks.count == 1 {
+            let task = tasks[0]
+            switch task.action {
+            case .launchApp:
+                guard let target = task.targetApp, let appInfo = ApplicationService.shared.getAppInfo(for: target) else {
+                    let cleanApp = task.targetApp ?? query
+                    return CommandRoutingResult(
+                        responseText: "App '\(cleanApp)' is not in Orbit's safety allowlist. This action is not supported yet.",
+                        commandToRegister: nil
+                    )
+                }
+                if !ApplicationService.shared.isAppInstalled(bundleId: appInfo.bundleId) {
                     return CommandRoutingResult(
                         responseText: "\(appInfo.displayName) is not installed on this Mac.",
                         commandToRegister: nil
                     )
                 }
-                
-                // Launch the app
-                MacActionService.shared.launchApp(name: target) { success, message in
-                    if !success {
-                        // Append error message to chat messages list
-                        DispatchQueue.main.async {
-                            ChatService.shared.messages.append(ChatMessage(text: message, sender: .assistant))
-                        }
-                    }
-                }
-                
                 let iconName: String
                 switch target {
                 case "safari": iconName = "safari.fill"
                 case "finder": iconName = "macwindow.on.rectangle"
-                case "calendar": iconName = "calendar"
                 case "notes": iconName = "note.text"
-                case "spotify": iconName = "music.note"
-                case "mail": iconName = "envelope.fill"
-                case "messages": iconName = "message.fill"
-                case "app store": iconName = "bag.fill"
                 case "textedit": iconName = "doc.text.fill"
+                case "terminal": iconName = "terminal.fill"
+                case "vscode", "vs code", "visual studio code": iconName = "curlybracket"
+                case "calculator": iconName = "plus.slash.minus"
+                case "system settings", "settings": iconName = "gearshape.fill"
                 default: iconName = "app.badge.fill"
                 }
-                
                 let cmd = Command(
                     title: "Open \(appInfo.displayName)",
                     description: "Launch \(appInfo.displayName) application",
                     iconName: iconName,
                     category: "System"
                 )
-                return CommandRoutingResult(responseText: "Opening and focusing \(appInfo.displayName).", commandToRegister: cmd)
+                return CommandRoutingResult(
+                    responseText: "Opening and focusing \(appInfo.displayName).",
+                    commandToRegister: cmd,
+                    tasks: tasks
+                )
+                
+            case .closeApp:
+                guard let target = task.targetApp, let appInfo = ApplicationService.shared.getAppInfo(for: target) else {
+                    let cleanApp = task.targetApp ?? query
+                    return CommandRoutingResult(
+                        responseText: "App '\(cleanApp)' is not in Orbit's safety allowlist. This action is not supported yet.",
+                        commandToRegister: nil
+                    )
+                }
+                let cmd = Command(
+                    title: "Close \(appInfo.displayName)",
+                    description: "Terminate \(appInfo.displayName) application",
+                    iconName: "xmark.circle.fill",
+                    category: "System"
+                )
+                return CommandRoutingResult(
+                    responseText: "Closing \(appInfo.displayName).",
+                    commandToRegister: cmd,
+                    tasks: tasks
+                )
+                
+            case .forceQuitApp:
+                guard let target = task.targetApp, let appInfo = ApplicationService.shared.getAppInfo(for: target) else {
+                    let cleanApp = task.targetApp ?? query
+                    return CommandRoutingResult(
+                        responseText: "App '\(cleanApp)' is not in Orbit's safety allowlist. This action is not supported yet.",
+                        commandToRegister: nil
+                    )
+                }
+                let cmd = Command(
+                    title: "Force Quit \(appInfo.displayName)",
+                    description: "Force close \(appInfo.displayName) application",
+                    iconName: "xmark.circle.fill",
+                    category: "System"
+                )
+                return CommandRoutingResult(
+                    responseText: "Force closing \(appInfo.displayName).",
+                    commandToRegister: cmd,
+                    tasks: tasks
+                )
+                
+            case .hideApp:
+                guard let target = task.targetApp, let appInfo = ApplicationService.shared.getAppInfo(for: target) else {
+                    let cleanApp = task.targetApp ?? query
+                    return CommandRoutingResult(
+                        responseText: "App '\(cleanApp)' is not in Orbit's safety allowlist. This action is not supported yet.",
+                        commandToRegister: nil
+                    )
+                }
+                let cmd = Command(
+                    title: "Hide \(appInfo.displayName)",
+                    description: "Hide \(appInfo.displayName) application",
+                    iconName: "eye.slash.fill",
+                    category: "System"
+                )
+                return CommandRoutingResult(
+                    responseText: "Hiding \(appInfo.displayName).",
+                    commandToRegister: cmd,
+                    tasks: tasks
+                )
+                
+            case .activateApp:
+                guard let target = task.targetApp, let appInfo = ApplicationService.shared.getAppInfo(for: target) else {
+                    let cleanApp = task.targetApp ?? query
+                    return CommandRoutingResult(
+                        responseText: "App '\(cleanApp)' is not in Orbit's safety allowlist. This action is not supported yet.",
+                        commandToRegister: nil
+                    )
+                }
+                let cmd = Command(
+                    title: "Activate \(appInfo.displayName)",
+                    description: "Bring \(appInfo.displayName) to front",
+                    iconName: "arrow.up.and.person.rectangle.portrait",
+                    category: "System"
+                )
+                return CommandRoutingResult(
+                    responseText: "Activating \(appInfo.displayName).",
+                    commandToRegister: cmd,
+                    tasks: tasks
+                )
+                
+            case .openFolder:
+                guard let folderName = task.folder else {
+                    return CommandRoutingResult(responseText: "Folder not specified.", commandToRegister: nil)
+                }
+                let cmd = Command(
+                    title: "Open \(folderName.capitalized)",
+                    description: "Open \(folderName.capitalized) folder",
+                    iconName: "folder.fill",
+                    category: "System"
+                )
+                return CommandRoutingResult(
+                    responseText: "Opening \(folderName.capitalized).",
+                    commandToRegister: cmd,
+                    tasks: tasks
+                )
+                
+            case .openFile:
+                guard let rawPath = task.file else {
+                    return CommandRoutingResult(responseText: "File path not specified.", commandToRegister: nil)
+                }
+                let expandedPath = (rawPath as NSString).expandingTildeInPath
+                let canonicalPath = URL(fileURLWithPath: expandedPath).path
+                let fileName = URL(fileURLWithPath: canonicalPath).lastPathComponent
+                let cmd = Command(
+                    title: "Open \(fileName)",
+                    description: "Open local file",
+                    iconName: "doc.text.fill",
+                    category: "Files"
+                )
+                return CommandRoutingResult(
+                    responseText: "Opening file \(fileName).",
+                    commandToRegister: cmd,
+                    tasks: tasks
+                )
+                
+            case .revealFile:
+                guard let rawPath = task.file else {
+                    return CommandRoutingResult(responseText: "File path not specified.", commandToRegister: nil)
+                }
+                let expandedPath = (rawPath as NSString).expandingTildeInPath
+                let canonicalPath = URL(fileURLWithPath: expandedPath).path
+                let fileName = URL(fileURLWithPath: canonicalPath).lastPathComponent
+                let cmd = Command(
+                    title: "Reveal \(fileName)",
+                    description: "Reveal file in Finder",
+                    iconName: "magnifyingglass",
+                    category: "System"
+                )
+                return CommandRoutingResult(
+                    responseText: "Revealing \(fileName) in Finder.",
+                    commandToRegister: cmd,
+                    tasks: tasks
+                )
+                
+            case .openWebsite:
+                guard let urlString = task.website, let url = URL(string: urlString) else {
+                    return CommandRoutingResult(responseText: "Invalid or unsupported website URL.", commandToRegister: nil)
+                }
+                let displayHost = url.host ?? "website"
+                let cmd = Command(
+                    title: "Open \(displayHost)",
+                    description: "Load \(displayHost) in browser",
+                    iconName: "safari.fill",
+                    category: "Navigation"
+                )
+                return CommandRoutingResult(
+                    responseText: "Opening \(displayHost) in browser.",
+                    commandToRegister: cmd,
+                    tasks: tasks
+                )
+                
+            case .searchWebsite:
+                let queryText = task.searchQuery ?? ""
+                guard !queryText.isEmpty else {
+                    return CommandRoutingResult(responseText: "Search query is empty.", commandToRegister: nil)
+                }
+                let displaySite = task.website?.capitalized ?? "Google"
+                let cmd = Command(
+                    title: "Search: \(queryText)",
+                    description: "Search \(displaySite) browser results",
+                    iconName: "magnifyingglass",
+                    category: "Productivity"
+                )
+                return CommandRoutingResult(
+                    responseText: "Searching \(displaySite) for \"\(queryText)\".",
+                    commandToRegister: cmd,
+                    tasks: tasks
+                )
+                
+            case .openSystemSettings:
+                let cmd = Command(
+                    title: "Open System Settings",
+                    description: "Launch System Settings application",
+                    iconName: "gearshape.fill",
+                    category: "System"
+                )
+                return CommandRoutingResult(
+                    responseText: "Opening System Settings.",
+                    commandToRegister: cmd,
+                    tasks: tasks
+                )
+                
+            case .lockScreen:
+                let cmd = Command(
+                    title: "Lock Screen",
+                    description: "Lock local macOS screen saver",
+                    iconName: "lock.fill",
+                    category: "System"
+                )
+                return CommandRoutingResult(
+                    responseText: "Locking the screen.",
+                    commandToRegister: cmd,
+                    tasks: tasks
+                )
+                
+            case .sleepMac:
+                // Handled above via confirmation short-circuit
+                break
             }
-            
-            // D. Handle non-allowlisted launch commands
-            return CommandRoutingResult(
-                responseText: "App '\(originalTarget)' is not in Orbit's safety allowlist. This action is not supported yet.",
-                commandToRegister: nil
-            )
         }
         
-        // 6. Generic Fallback
-        let response = "I don’t know how to do that yet, but I’m learning."
-        return CommandRoutingResult(responseText: response, commandToRegister: nil)
+        // Multi-step task sequence response
+        let planDescription = tasks.enumerated().map { "\($0 + 1). \(ActionExecutor.shared.getActionDescription($1))" }.joined(separator: "\n")
+        let responseText = "I have planned the following actions:\n\(planDescription)"
+        let cmd = Command(
+            title: query,
+            description: "Multi-step command sequence",
+            iconName: "list.bullet",
+            category: "Automation"
+        )
+        
+        return CommandRoutingResult(
+            responseText: responseText,
+            commandToRegister: cmd,
+            tasks: tasks
+        )
     }
 }

@@ -28,3 +28,7 @@ xcuserdata/
 
 # CocoaPods
 Pods/
+
+# Environment configurations
+.env
+

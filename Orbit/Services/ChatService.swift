@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import Speech
 import AVFoundation
+import AppKit
 
 class ChatService: ObservableObject {
     static let shared = ChatService()
@@ -26,6 +27,7 @@ class ChatService: ObservableObject {
     }
     
     private var cancellables = Set<AnyCancellable>()
+    private var pendingTasks: [Task] = []
     
     func focusInput() {
         DispatchQueue.main.async {
@@ -106,6 +108,48 @@ class ChatService: ObservableObject {
         }
         
         let result = CommandRouter.shared.route(text)
+        
+        // Intercept Sleep Confirmations
+        if result.isSleepConfirmation {
+            self.pendingTasks = result.tasks ?? []
+            Just(())
+                .delay(for: .seconds(0.5), scheduler: RunLoop.main)
+                .sink { [weak self] _ in
+                    guard let self = self else { return }
+                    let confirmationMsg = ChatMessage(
+                        text: "Confirm Sleep Mac request",
+                        sender: .assistant,
+                        isSleepConfirmation: true
+                    )
+                    self.messages.append(confirmationMsg)
+                    self.isProcessing = false
+                    self.statusLabel = "Ready to help"
+                }
+                .store(in: &cancellables)
+            return
+        }
+        
+        // Intercept File Confirmations
+        if result.isFileConfirmation, let filePath = result.filePath {
+            self.pendingTasks = result.tasks ?? []
+            Just(())
+                .delay(for: .seconds(0.5), scheduler: RunLoop.main)
+                .sink { [weak self] _ in
+                    guard let self = self else { return }
+                    let confirmationMsg = ChatMessage(
+                        text: "Confirm File Open Request",
+                        sender: .assistant,
+                        isFileConfirmation: true,
+                        filePath: filePath
+                    )
+                    self.messages.append(confirmationMsg)
+                    self.isProcessing = false
+                    self.statusLabel = "Ready to help"
+                }
+                .store(in: &cancellables)
+            return
+        }
+        
         let isLocalCommand = result.commandToRegister != nil || result.responseText != "I don’t know how to do that yet, but I’m learning."
         
         if isLocalCommand {
@@ -117,8 +161,26 @@ class ChatService: ObservableObject {
                         CommandService.shared.addCommand(command)
                     }
                     self.messages.append(ChatMessage(text: result.responseText, sender: .assistant))
-                    self.isProcessing = false
-                    self.statusLabel = "Ready to help"
+                    
+                    if let tasks = result.tasks, !tasks.isEmpty {
+                        self.isProcessing = true
+                        ActionExecutor.shared.execute(tasks) { [weak self] success, message, shouldShow in
+                            guard let self = self else { return }
+                            DispatchQueue.main.async {
+                                if shouldShow && (tasks.count > 1 || !success) {
+                                    self.messages.append(ChatMessage(text: message, sender: .assistant))
+                                    if self.isVoiceRepliesEnabled {
+                                        SpeechService.shared.speak(message)
+                                    }
+                                }
+                                self.isProcessing = false
+                                self.statusLabel = "Ready to help"
+                            }
+                        }
+                    } else {
+                        self.isProcessing = false
+                        self.statusLabel = "Ready to help"
+                    }
                 }
                 .store(in: &cancellables)
         } else {
@@ -148,6 +210,55 @@ class ChatService: ObservableObject {
         }
         
         let result = CommandRouter.shared.route(text)
+        
+        // Intercept Sleep Confirmations
+        if result.isSleepConfirmation {
+            self.pendingTasks = result.tasks ?? []
+            Just(())
+                .delay(for: .seconds(0.5), scheduler: RunLoop.main)
+                .sink { [weak self] _ in
+                    guard let self = self else { return }
+                    let confirmationMsg = ChatMessage(
+                        text: "Confirm Sleep Mac request",
+                        sender: .assistant,
+                        isSleepConfirmation: true
+                    )
+                    self.messages.append(confirmationMsg)
+                    self.isProcessing = false
+                    self.statusLabel = "Ready to help"
+                    if self.isVoiceRepliesEnabled {
+                        SpeechService.shared.speak("Do you want to sleep your Mac?")
+                    }
+                }
+                .store(in: &cancellables)
+            return
+        }
+        
+        // Intercept File Confirmations
+        if result.isFileConfirmation, let filePath = result.filePath {
+            self.pendingTasks = result.tasks ?? []
+            Just(())
+                .delay(for: .seconds(0.5), scheduler: RunLoop.main)
+                .sink { [weak self] _ in
+                    guard let self = self else { return }
+                    let confirmationMsg = ChatMessage(
+                        text: "Confirm File Open Request",
+                        sender: .assistant,
+                        isFileConfirmation: true,
+                        filePath: filePath
+                    )
+                    self.messages.append(confirmationMsg)
+                    self.isProcessing = false
+                    self.statusLabel = "Ready to help"
+                    if self.isVoiceRepliesEnabled {
+                        let fileName = URL(fileURLWithPath: filePath).lastPathComponent
+                        SpeechService.shared.speak("Do you want to open the file: \(fileName)?")
+                    }
+                }
+                .store(in: &cancellables)
+            return
+        }
+        
         let isLocalCommand = result.commandToRegister != nil || result.responseText != "I don’t know how to do that yet, but I’m learning."
         
         if isLocalCommand {
@@ -162,14 +273,198 @@ class ChatService: ObservableObject {
                     if self.isVoiceRepliesEnabled {
                         SpeechService.shared.speak(result.responseText)
                     }
-                    self.isProcessing = false
-                    self.statusLabel = "Ready to help"
+                    
+                    if let tasks = result.tasks, !tasks.isEmpty {
+                        self.isProcessing = true
+                        ActionExecutor.shared.execute(tasks) { [weak self] success, message, shouldShow in
+                            guard let self = self else { return }
+                            DispatchQueue.main.async {
+                                if shouldShow && (tasks.count > 1 || !success) {
+                                    self.messages.append(ChatMessage(text: message, sender: .assistant))
+                                    if self.isVoiceRepliesEnabled {
+                                        SpeechService.shared.speak(message)
+                                    }
+                                }
+                                self.isProcessing = false
+                                self.statusLabel = "Ready to help"
+                            }
+                        }
+                    } else {
+                        self.isProcessing = false
+                        self.statusLabel = "Ready to help"
+                    }
                 }
                 .store(in: &cancellables)
         } else {
             handleUnrecognizedCommand(text, speakResult: true)
         }
     }
+    
+    func confirmOpenFile(path: String, messageId: UUID) {
+        // Remove the confirmation card from messages list
+        if let index = messages.firstIndex(where: { $0.id == messageId }) {
+            messages.remove(at: index)
+        }
+        
+        isProcessing = true
+        statusLabel = "Executing tasks..."
+        
+        if !pendingTasks.isEmpty {
+            let tasksToRun = pendingTasks
+            pendingTasks = [] // Reset
+            
+            ActionExecutor.shared.execute(tasksToRun) { [weak self] success, message, shouldShow in
+                guard let self = self else { return }
+                DispatchQueue.main.async {
+                    if shouldShow && (tasksToRun.count > 1 || !success) {
+                        self.messages.append(ChatMessage(text: message, sender: .assistant))
+                        if self.isVoiceRepliesEnabled {
+                            SpeechService.shared.speak(message)
+                        }
+                    }
+                    self.isProcessing = false
+                    self.statusLabel = "Ready to help"
+                }
+            }
+        } else {
+            let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+            let fileURL = URL(fileURLWithPath: trimmed)
+            DispatchQueue.main.async {
+                if NSWorkspace.shared.open(fileURL) {
+                    let message = "Opening file \(fileURL.lastPathComponent)."
+                    self.messages.append(ChatMessage(text: message, sender: .assistant))
+                    if self.isVoiceRepliesEnabled {
+                        SpeechService.shared.speak(message)
+                    }
+                    let fileName = URL(fileURLWithPath: path).lastPathComponent
+                    let cmd = Command(
+                        title: "Open \(fileName)",
+                        description: "Open local file",
+                        iconName: "doc.text.fill",
+                        category: "Files"
+                    )
+                    CommandService.shared.addCommand(cmd)
+                } else {
+                    let message = "Failed to open file: \(fileURL.lastPathComponent)."
+                    self.messages.append(ChatMessage(text: message, sender: .assistant))
+                }
+                self.isProcessing = false
+                self.statusLabel = "Ready to help"
+            }
+        }
+    }
+    
+    func cancelOpenFile(messageId: UUID) {
+        // Remove the confirmation card from messages list
+        if let index = messages.firstIndex(where: { $0.id == messageId }) {
+            messages.remove(at: index)
+        }
+        pendingTasks = [] // Clear pending tasks
+        
+        let cancelMsg = ChatMessage(text: "File open cancelled.", sender: .assistant)
+        messages.append(cancelMsg)
+        if isVoiceRepliesEnabled {
+            SpeechService.shared.speak("File open cancelled.")
+        }
+    }
+    
+    func confirmSleep(messageId: UUID) {
+        if let index = messages.firstIndex(where: { $0.id == messageId }) {
+            messages.remove(at: index)
+        }
+        
+        isProcessing = true
+        statusLabel = "Sleeping Mac..."
+        
+        if !pendingTasks.isEmpty {
+            let tasksToRun = pendingTasks
+            pendingTasks = []
+            
+            ActionExecutor.shared.execute(tasksToRun) { [weak self] success, message, shouldShow in
+                guard let self = self else { return }
+                DispatchQueue.main.async {
+                    if shouldShow && (tasksToRun.count > 1 || !success) {
+                        self.messages.append(ChatMessage(text: message, sender: .assistant))
+                        if self.isVoiceRepliesEnabled {
+                            SpeechService.shared.speak(message)
+                        }
+                    }
+                    self.isProcessing = false
+                    self.statusLabel = "Ready to help"
+                }
+            }
+        } else {
+            SystemService.shared.sleepMac { [weak self] success, message in
+                guard let self = self else { return }
+                DispatchQueue.main.async {
+                    self.messages.append(ChatMessage(text: message, sender: .assistant))
+                    if self.isVoiceRepliesEnabled {
+                        SpeechService.shared.speak(message)
+                    }
+                    self.isProcessing = false
+                    self.statusLabel = "Ready to help"
+                }
+            }
+        }
+    }
+    
+    func cancelSleep(messageId: UUID) {
+        if let index = messages.firstIndex(where: { $0.id == messageId }) {
+            messages.remove(at: index)
+        }
+        pendingTasks = []
+        
+        let cancelMsg = ChatMessage(text: "Sleep request cancelled.", sender: .assistant)
+        messages.append(cancelMsg)
+        if isVoiceRepliesEnabled {
+            SpeechService.shared.speak("Sleep request cancelled.")
+        }
+    }
+    
+    func confirmForceQuit(appName: String, messageId: UUID) {
+        if let index = messages.firstIndex(where: { $0.id == messageId }) {
+            messages.remove(at: index)
+        }
+        
+        isProcessing = true
+        statusLabel = "Force quitting \(appName)..."
+        
+        ApplicationService.shared.forceQuitApp(name: appName) { [weak self] success, message in
+            guard let self = self else { return }
+            DispatchQueue.main.async {
+                self.messages.append(ChatMessage(text: message, sender: .assistant))
+                if self.isVoiceRepliesEnabled {
+                    SpeechService.shared.speak(message)
+                }
+                self.isProcessing = false
+                self.statusLabel = "Ready to help"
+            }
+        }
+    }
+    
+    func cancelForceQuit(messageId: UUID) {
+        if let index = messages.firstIndex(where: { $0.id == messageId }) {
+            messages.remove(at: index)
+        }
+        let cancelMsg = ChatMessage(text: "Force quit cancelled.", sender: .assistant)
+        messages.append(cancelMsg)
+        if isVoiceRepliesEnabled {
+            SpeechService.shared.speak("Force quit cancelled.")
+        }
+    }
+    
+    func openAccessibilitySettings(messageId: UUID) {
+        if let index = messages.firstIndex(where: { $0.id == messageId }) {
+            messages.remove(at: index)
+        }
+        AutomationManager.shared.openAccessibilitySettings()
+        let settingsMsg = ChatMessage(text: "Opened Accessibility Privacy Settings.", sender: .assistant)
+        messages.append(settingsMsg)
+        if isVoiceRepliesEnabled {
+            SpeechService.shared.speak("Opened settings.")
+        }
+    }
+
     
     private func handleReminderInput(_ query: String, speakRequest: Bool) {
         isProcessing = false
